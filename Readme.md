@@ -2,7 +2,7 @@
 
 ## Description
 
-MicroAS-seq is a targeted multiplex amplification library construction protocol to detect micro-exon skipping. Here is a comprehensive pipeline for demultiplexing and quantifying sequencing data from MicroAS-seq experiments. This pipeline processes multiplexed sequencing data through adapter trimming, barcode demultiplexing, alignment, and quantification. It's specifically designed for analyzing microAS-seq or similar multiplexed sequencing data.
+MicroAS-seq is a targeted multiplex amplification library construction protocol to detect micro-exon skipping. Here is a comprehensive pipeline for demultiplexing and quantifying sequencing data from MicroAS-seq experiments. This pipeline processes multiplexed sequencing data through adapter trimming, barcode demultiplexing, alignment, and quantification. It's specifically designed for analyzing MicroAS-seq or similar multiplexed sequencing data.
 
 ## Table of Contents
 
@@ -69,16 +69,10 @@ OR install with mamba for faster installation:
 
 ```bash
 conda install -n base -c conda-forge mamba
-mamba create -n microAS python=3.7.6 -y
+mamba create -n microAS python -y
 mamba activate microAS
 mamba install -c bioconda \
-    trim-galore=0.6.6 \
-    fastq-multx \
-    star=2.7.3a \
-    samtools=1.9 \
-    deeptools=3.1.3 \
-    subread=2.0.0 \
-    -y
+    trim-galore fastq-multx star samtools deeptools subread -y
 ```
 
 ### 3. Verify installation
@@ -157,9 +151,9 @@ microAS \
 ```
 
 Parameters:
-- `-w`: Working directory containing input FASTQ files
-- `-b`: Path to barcode file
-- `-s`: Path to STAR index directory
+- `-w`: Working directory containing input FASTQ files (**Must use absolute path**)
+- `-b`: Path to barcode file (**Must use absolute path**)
+- `-s`: Path to STAR index directory (Path)
 - `-a`: Path to GTF annotation file, both whole genome gtf and personalized gtf for featurecounts are acceptable
 - `-t`: Number of threads (default: 8)
 
@@ -219,4 +213,4 @@ If you use this pipeline in your research, please cite:
 
 > Wang, Z., Yang, L., Yang, S., Li, G., Xu, M., Kong, B., Shao, C., & Liu, Z. (2025). Isoform switch of CD47 provokes macrophage-mediated pyroptosis in ovarian cancer. bioRxiv, 2025.2004.2017.649282. https://doi.org/10.1101/2025.04.17.649282
 
-For questions or issues, please open an issue on GitHub or contact wangzixiang@sdu.edu.cn.
+For questions or issues, please open an issue on GitHub or contact 970214035yl@gmail.com, wangzixiang@sdu.edu.cn.
