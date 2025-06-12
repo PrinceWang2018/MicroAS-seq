@@ -1,0 +1,223 @@
+#!/bin/bash
+#SBATCH -o job.%j.out
+#SBATCH -p princewang
+#SBATCH --qos=low
+#SBATCH -J MicroAS-seq_workflow
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --mail-type=END
+#SBATCH --mail-user=wangzixiang@sdu.edu.cn
+#SBATCH -N 1
+#SBATCH -n 1
+#SBATCH --comment=MicroAS-seq_workflow
+
+set -euo pipefail  # Enable strict error checking
+
+# Load conda environment
+source /home/wzx/miniconda3/etc/profile.d/conda.sh
+
+VERSION="1.0.0"
+AUTHOR="Zixiang Wang"
+DATE=$(date +"%Y-%m-%d")
+
+echo "#######################################################################"
+echo "# MicroAS-seq Workflow Pipeline v${VERSION}"
+echo "# Author: ${AUTHOR}"
+echo "# Date: ${DATE}"
+echo "# Using single microAS conda environment"
+echo ""
+echo "# You are welcome to reference: github/princewang2018/MicroAS-seq "
+echo ""
+echo "# Life is short, smile while you still have teeth."
+echo "#######################################################################"
+echo ""
+echo "Starting run at: $(date)"
+echo ""
+
+# Function to display usage
+usage() {
+    echo "Usage: $0 [options]"
+    echo ""
+    echo "Required parameters:"
+    echo "  -w, --work-dir      Working directory containing raw fastq files"
+    echo "  -b, --barcode       Path to barcode file"
+    echo "  -s, --star-index    Path to STAR index directory"
+    echo "  -a, --annotation    Path to GTF annotation file"
+    echo ""
+    echo "Optional parameters:"
+    echo "  -t, --threads       Number of threads (default: 8)"
+    echo "  -h, --help          Display this help message"
+    echo ""
+    echo "Example:"
+    echo "  $0 -w /path/to/workdir -b /path/to/barcode.txt -s /path/to/STAR_index -a /path/to/annotation.gtf"
+    exit 1
+}
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    key="$1"
+    case $key in
+        -w|--work-dir)
+        WORK_DIR="$2"
+        shift; shift
+        ;;
+        -b|--barcode)
+        BARCODE_FILE="$2"
+        shift; shift
+        ;;
+        -s|--star-index)
+        STAR_INDEX="$2"
+        shift; shift
+        ;;
+        -a|--annotation)
+        ANNOTATION="$2"
+        shift; shift
+        ;;
+        -t|--threads)
+        THREADS="$2"
+        shift; shift
+        ;;
+        -h|--help)
+        usage
+        ;;
+        *)
+        echo "Unknown option: $1"
+        usage
+        ;;
+    esac
+done
+
+# Set default values
+THREADS=${THREADS:-8}
+
+# Validate required parameters
+if [[ -z "${WORK_DIR:-}" || -z "${BARCODE_FILE:-}"  || -z "${STAR_INDEX:-}" || -z "${ANNOTATION:-}" ]]; then
+    echo "Error: Missing required parameters!"
+    usage
+fi
+
+# Check if work directory exists
+if [[ ! -d "${WORK_DIR}" ]]; then
+    echo "Error: Work directory not found: ${WORK_DIR}"
+    exit 1
+fi
+
+# Check if barcode file exists
+if [[ ! -f "${BARCODE_FILE}" ]]; then
+    echo "Error: Barcode file not found: ${BARCODE_FILE}"
+    exit 1
+fi
+
+# Check if required tools are available
+check_command() {
+    if ! command -v "$1" &> /dev/null; then
+        echo "Error: $1 could not be found. Please install it or add to PATH."
+        exit 1
+    fi
+}
+
+echo "Checking required tools..."
+conda activate microAS
+check_command trim_galore
+check_command fastq-multx
+check_command STAR
+check_command samtools
+check_command bamCoverage
+check_command featureCounts
+
+# Create output directory structure
+echo "Creating output directories..."
+mkdir -p "${WORK_DIR}/03.Cleandata"
+mkdir -p "${WORK_DIR}/04.Fastqmultx"
+mkdir -p "${WORK_DIR}/05.Alignment"
+mkdir -p "${WORK_DIR}/06.Quantification"
+
+# Get sample name
+SAMPLE_RAW=$(ls ${WORK_DIR}/*_1.fq.gz 2>/dev/null || ls ${WORK_DIR}/*_1.fastq.gz 2>/dev/null)
+if [[ -z "$SAMPLE_RAW" ]]; then
+    echo "Error: No raw fastq files found in ${WORK_DIR}"
+    exit 1
+fi
+SAMPLE=$(basename "${SAMPLE_RAW}" | sed 's/_1.fq.gz//;s/_1.fastq.gz//')
+echo "Processing sample: ${SAMPLE}"
+
+# Log parameters
+echo "Parameters:"
+echo "  Work directory: ${WORK_DIR}"
+echo "  Barcode file: ${BARCODE_FILE}"
+echo "  STAR index: ${STAR_INDEX}"
+echo "  Annotation: ${ANNOTATION}"
+echo "  Threads: ${THREADS}"
+echo ""
+
+# Function to run commands with error checking
+run_command() {
+    local cmd="$@"
+    echo "Running: ${cmd}"
+    if ! eval "${cmd}"; then
+        echo "Error: Command failed: ${cmd}"
+        exit 1
+    fi
+}
+
+# Step 1: Trim files
+echo "Step 1: Trim files"
+run_command "trim_galore -q 20 --phred33 --stringency 3 --length 50 -e 0.1 \
+            -a CTGTCTCTTATACACATCT -a2 CTGTCTCTTATACACATCT \
+            --paired ${WORK_DIR}/${SAMPLE}_1.fq.gz ${WORK_DIR}/${SAMPLE}_2.fq.gz \
+            --gzip -o ${WORK_DIR}/03.Cleandata"
+
+# Step 2: Run fastq-multx
+echo "Step 2: Run fastq-multx"
+run_command "cd ${WORK_DIR}/04.Fastqmultx && \
+            fastq-multx -B ${BARCODE_FILE} -m 1 -b \
+            ${WORK_DIR}/03.Cleandata/${SAMPLE}_1_val_1.fq.gz \
+            ${WORK_DIR}/03.Cleandata/${SAMPLE}_2_val_2.fq.gz \
+            -o %.R1.fastq -o %.R2.fastq > fastq-multx_report.summary"
+
+# Step 3: Alignment with STAR
+echo "Step 3: Alignment with STAR"
+cd ${WORK_DIR}/04.Fastqmultx
+ls *.fastq | cut -d "." -f 1 | uniq > samplelist.txt
+
+while read ID; do
+    echo "Processing sample: ${ID}"
+    run_command "STAR \
+        --genomeDir ${STAR_INDEX} \
+        --runMode alignReads \
+        --runThreadN ${THREADS} \
+        --readFilesIn ${WORK_DIR}/04.Fastqmultx/${ID}.R1.fastq ${WORK_DIR}/04.Fastqmultx/${ID}.R2.fastq \
+        --outFileNamePrefix ${WORK_DIR}/05.Alignment/${ID}_STAR_ \
+        --outSAMtype BAM SortedByCoordinate \
+        --outBAMsortingThreadN ${THREADS} \
+        --quantMode TranscriptomeSAM GeneCounts"
+done < samplelist.txt
+
+# Step 4: Normalization with TPM
+echo "Step 4: Normalization with TPM"
+cd ${WORK_DIR}/05.Alignment
+for BAM in *Aligned.sortedByCoord.out.bam; do
+    run_command "bamCoverage -bs 1 -b ${BAM} -o ${BAM}.tpm.bw -p ${THREADS} --normalizeUsing BPM"
+done
+
+# Step 5: featureCounts quantification
+echo "Step 5: featureCounts quantification"
+run_command "featureCounts -T ${THREADS} -t exon -g exon_id -p -M -J -O \
+            -a ${ANNOTATION} \
+            -o ${WORK_DIR}/06.Quantification/${SAMPLE}_counts.txt \
+            ${WORK_DIR}/05.Alignment/*.bam"
+
+# Final cleanup and completion
+echo "Workflow completed successfully at: $(date)"
+touch "${WORK_DIR}/microAS_workflow.done"
+
+echo ""
+echo "#######################################################################"
+echo "# Output Summary"
+echo "#######################################################################"
+echo "# Trimmed files: ${WORK_DIR}/03.Cleandata/"
+echo "# Demultiplexed files: ${WORK_DIR}/04.Fastqmultx/"
+echo "# Aligned BAM files: ${WORK_DIR}/05.Alignment/"
+echo "# Quantification results: ${WORK_DIR}/06.Quantification/"
+echo "# Completion marker: ${WORK_DIR}/microAS_workflow.done"
+echo "#######################################################################"
