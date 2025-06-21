@@ -51,40 +51,46 @@ source ~/.bashrc
 ### 2. Set up Conda environment
 
 ```bash
-conda create -n microAS python=3.7.6 -y
-conda activate microAS
+# Install mamba for faster dependency resolution
+conda install -n base -c conda-forge mamba -y
+
+# Create environment with Python 3.8
+mamba create -n microAS python=3.8 -y
+mamba activate microAS
 
 # Install all required tools
-conda install -c bioconda \
-    trim-galore=0.6.6 \
-    fastq-multx \
-    star=2.7.3a \
-    samtools=1.9 \
-    deeptools=3.1.3 \
-    subread=2.0.0 \
-    -y
-```
-
-OR install with mamba for faster installation:
-
-```bash
-conda install -n base -c conda-forge mamba
-mamba create -n microAS python -y
-mamba activate microAS
 mamba install -c bioconda \
-    trim-galore fastq-multx star samtools deeptools subread -y
+    trim-galore \
+    fastq-multx \
+    star \
+    samtools \
+    deeptools \
+    subread \
+    -y
 ```
 
 ### 3. Verify installation
 
 ```bash
+# Activate your environment
 conda activate microAS
+
+# Check all tools are working
 trim_galore --version
 STAR --version
 samtools --version
 deeptools --version
 featureCounts -v
+fastq-multx -h | head -n 5
 ```
+
+Expected output versions:
+
+- trim-galore: 0.6.6+ 
+- STAR: 2.7.3a+
+- samtools: 1.9+
+- deeptools: 3.1.3+
+- featureCounts: 2.0.0+
 
 ## Index Files Deployment
 
@@ -104,15 +110,16 @@ gunzip *.gz
 
 ```bash
 conda activate microAS
+mkdir -p /path/to/your/STAR_index_hg38
 STAR --runThreadN 16 \
      --runMode genomeGenerate \
      --genomeDir /path/to/your/STAR_index_hg38 \
      --genomeFastaFiles refs/hg38/hg38.fa \
      --sjdbGTFfile refs/hg38/hg38.knownGene.gtf \
-     --sjdbOverhang 100
+     --sjdbOverhang 149
 ```
 
-You can also use pre-built STAR indices compatible with STAR (v2.7.3a).
+You can also use pre-built STAR index compatible with STAR (corresponding version).
 
 ## Input Data Organization
 
@@ -162,15 +169,23 @@ Parameters:
 A small test dataset is available at GitHub. To run the demo:
 
 ```bash
+# Activate environment
 conda activate microAS
+
+# Set variables
+## microAS_PATH=/path/to/MicroAS-seq 
+STAR_INDEX_PATH=/path/to/STAR_index_hg38 
+
 cd $microAS_PATH/Demo_data
 microAS \
   -w $microAS_PATH/Demo_data \
   -b $microAS_PATH/Demo_data/barcode_template_FT14.txt \
-  -s /home/wzx/BIG_REF/index_STAR_hg38 \   #Please modified this to your: /path/to/STAR_index_directory
+  -s $STAR_INDEX_PATH \   #Please modified this to your: /path/to/STAR_index_directory
   -a $microAS_PATH/Demo_data/CD47_hg38_gencode_v33.gtf \
   -t 8
 ```
+
+**Note:** You need to create a STAR index before running the demo. See [Index Files Deployment](#index-files-deployment) section.
 
 ## Output Files
 
@@ -188,24 +203,62 @@ work_directory/
 ## Troubleshooting
 
 1. **Conda environment issues**:
-   - Ensure you've activated the correct environment
+   - Recreate environment if packages fail to load
+   
+   - If conda activate doesn't work, try:
+   
+     ```shell
+     eval "$(conda shell.bash hook)"
+     conda activate microAS
+     ```
+   
+2. **deepTools installation issues**:
+   
+   - Use Python 3.8+ environment for better compatibility
+   - See [deeptools_installation_guide.md](deeptools_installation_guide.md) for detailed solutions
+   - If persistent, create separate environment: `mamba create -n deeptools_only python=3.8 deeptools -c bioconda -y`
+   
+3. **Dependency conflicts**:
+
+   - Clear conda cache: `conda clean --all`
+   - Try: `mamba install --force-reinstall [package_name]`
    - Recreate environment if packages fail to load
 
-2. **Barcode demultiplexing errors**:
+4. **STAR index creation**:
+
+   - Requires ~30GB disk space and 32GB+ RAM
+   - Use `--limitGenomeGenerateRAM` to control memory usage
+   - For demo, you can download pre-built indices
+
+5. **Barcode demultiplexing errors**:
+
    - Verify barcode file format (tab-separated)
    - Check for barcode mismatches
+   - Ensure barcode file has Unix line endings: `dos2unix barcode.txt`
 
-3. **Memory errors**:
+6. **Memory errors**:
+
    - Reduce the number of threads if you encounter memory issues
    - STAR alignment may require significant RAM for large genomes
+   - Use `--limitBAMsortRAM` for STAR alignment
 
-4. **Input file errors**:
-   - Verify FASTQ files are properly named and paired
+7. **Input file errors**:
+
+   - Verify FASTQ files are properly named and paired (ending with `_1.fq.gz` and `_2.fq.gz`)
    - Check file integrity with `zcat file.fq.gz | head`
+   - Ensure files are in the work directory specified by `-w`
 
-5. **Annotation file problems**:
+8. **Annotation file problems**:
+
    - Ensure GTF file matches your genome version
    - Verify featureCounts can read the annotation file
+   - Check GTF format: `head -n 10 annotation.gtf`
+
+9. **Path issues**:
+
+   - Use absolute paths for all parameters (`-w`, `-b`, `-s`, `-a`)
+   - Avoid spaces in file paths
+   - Check file permissions: `ls -la /path/to/files`
 
 ## Citation
 
